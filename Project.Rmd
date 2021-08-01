@@ -1,0 +1,1700 @@
+---
+title: "Loan approval prediction"
+output:
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+  pdf_document: default
+---
+### Reg. No: 18BCE1314
+
+### Name: THARUN BHARGAV A
+
+## Setup
+## Loading the dataset
+* * *
+```{r}
+loan<- read.csv("lc_loan2.csv")
+```
+
+## What problem are you trying to solve?
+
+* * *
+
+People require financial support or funding for various reasons. The main source from which people get funding is banks/lenders in the form of loans. When people successfully repay their loans, the transaction is beneficial to both the bank/lender and the borrower. However, on some occasions, borrowers fail to repay the loan and the banks/lenders suffers a huge loss. Hence, banks/lenders have to be selective while sanctioning loans.  This project aims to predict the likelihood of a borrower defaulting on the loan. In addition, classify borrowers into various categories of risks. This will help lenders further understand the risk involved in a loan and decide whether to approve it or not.
+
+* * *
+
+## What data have you chosen ?(chosen Dataset, source of dataset, description of dataset, basic commands to describe dataset)
+
+- Chosen dataset - Lending Club loan dataset
+- Source of dataset - https://data.world/lpetrocelli/lendingclub-loan-data-2017-q-1
+
+* * *
+## Description:-
+
+### This is LendingClub's complete loan data for all loans issued from 2007 to 2018 in US.
+
+
+* * *
+
+### Dimension of the dataset
+```{r}
+
+dim(loan)
+
+```
+
+* * *
+
+### Column names
+```{r}
+colnames(loan)
+
+```
+
+* * *
+
+### head of the dataset
+```{r}
+head(loan,5)
+```
+
+* * *
+
+### Structure of the dataset
+```{r}
+str(loan)
+```
+
+* * *
+
+### Summary
+```{r}
+summary(loan)
+```
+
+* * *
+
+## Objectives:-
+### 1. Performing data manipulation, data cleaning
+### 2. Building logistic regression model, decision tree, random forest model and SVM to predict the likelihood of a borrower defaulting on the loan, thus helping decide whether loan should be approved or not.
+### 3. Comparing the performance of the models.
+### 4. Building a classification model to classify loans into 1 of 7 categories from A to G, to indicate the risk involved.
+### 5. Comparing the performance of the multi-class models.
+
+* * *
+## Is there any work previously reported on the problem and the data? If so, discuss it here.
+
+### Some work has been carried out on the dataset to perform loan approval using models employing various machine learning algorithms like logistic regression, SVM and Gradient Boosting machine.
+
+* * *
+
+### Loading libraries
+
+```{r message=FALSE, warning=FALSE}
+library(nnet)
+library(tidyverse)
+library(caret)
+library(car)
+library(broom)
+library(caTools) 
+library(dplyr) 
+library(party)
+library(magrittr)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(e1071) 
+library(klaR)
+library(rpart.plot)
+library(randomForest)
+library(kernlab)
+library(xgboost)
+library(lubridate)
+library(ggpubr)
+library(pROC)
+library(gbm)
+library(knitr)
+```
+
+
+* * *
+
+```{r}
+
+table(loan$loan_status)
+
+```
+
+* * *
+
+#### Checking number of missing elements in columns
+```{r}
+colSums(is.na(loan))
+```
+
+
+* * *
+
+#### Removing columns with 1 or less distinct elements
+```{r}
+ndisColums <- c()
+for( i in 1:ncol(loan))
+  if(n_distinct(loan[,i]) <= 1 ){
+    ndisColums = c(ndisColums, colnames(loan)[i])
+  }
+ndisColums
+loan[ ,ndisColums]<- NULL
+
+```
+
+* * *
+
+#### Removing columns with more than 25% missing elements
+```{r}
+
+remColumns <- c()
+for( i in colnames(loan))
+  if(colSums(is.na(loan[c(i)])) > 200000 ){
+    remColumns = c(remColumns, i)
+  }
+remColumns
+loan[ ,remColumns]<- NULL
+
+```
+
+
+```{r}
+sort(colnames(loan))
+```
+
+```{r}
+loan%>%filter(funded_amnt == loan_amnt)%>%summarize(n())
+loan[, "funded_amnt"] <- NULL
+```
+
+```{r}
+remColumns <- c('funded_amnt_inv','desc' , 'collection_recovery_fee', 'collections_12_mths_ex_med',
+                'url','policy_code', 'tot_coll_amt', 'emp_title',
+                'total_pymnt_inv', 
+                'total_rev_hi_lim', 'title')
+loan[, remColumns]<- NULL
+```
+
+
+```{r}
+loan <- loan%>%filter(loan_status == "Fully Paid"| loan_status == "Charged Off")
+loan <- loan%>%filter( (loan_status == 'Charged Off')| (loan_amnt <= total_rec_prncp & loan_status == 'Fully Paid'))
+loan <- loan%>%filter(dti >=0 && dti <= 100)
+```
+
+
+```{r}
+loan$addr_state <- as.factor(loan$addr_state)
+loan$grade <- as.factor(loan$grade)
+loan$purpose <- as.factor(loan$purpose)
+loan$application_type <- as.factor(loan$application_type)
+loan$home_ownership <- as.factor(loan$home_ownership)
+
+loan <- loan%>%mutate(term = gsub(' ','', term))%>%mutate(term = gsub('months','', term))
+loan$term <- as.numeric(loan$term)
+loan$id <- NULL
+loan$zip_code <- NULL
+loan$verification_status_joint <- NULL
+
+
+
+
+```
+
+
+```{r}
+loan<-loan%>%separate(issue_d, c('issue_mon', 'issue_yr'), "-")
+loan$issue_yr<- as.factor(loan$issue_yr)
+loan$issue_mon <- as.factor(loan$issue_mon)
+loan$verification_status <- as.factor(loan$verification_status)
+loan$sub_grade <- as.factor(loan$sub_grade)
+
+loan$loan_status <- as.factor(loan$loan_status)
+loan$emp_length <- as.factor(loan$emp_length)
+
+loan$pymnt_plan <- NULL
+loan$initial_list_status <- NULL
+loan$next_pymnt_d <- NULL
+
+loan$outcome <- as.factor(ifelse(loan$loan_status == "Fully Paid", 0 , 1))
+loan$loan_status <- factor(ifelse(loan$loan_status == "Fully Paid", "Fully.Paid" , "Charged.Off"), levels = c("Fully.Paid" , "Charged.Off"))
+loan <- na.omit(loan)
+
+
+```
+
+
+* * *
+## EDA
+
+```{r warning=FALSE, message=FALSE}
+state_freq<-loan%>%group_by(addr_state)%>%
+  summarize("count" = n())%>%
+  arrange(desc(count))%>%
+  mutate("prct" = (count/sum(count))*100)
+```
+
+
+```{r}
+state_freq
+```
+
+```{r}
+ggplot(state_freq, aes(x=reorder(addr_state,prct), y = prct, fill = addr_state))+
+  geom_bar(stat="identity")+coord_flip()+
+  labs(x = "State", y= "Percentage", title = "State percentage")
+```
+
+### Inferences
+#### California has the highest number of loans, hence most borrowers are from California.
+
+* * *
+
+
+### Employment length
+
+```{r warning=FALSE, message=FALSE}
+emp_per<-loan%>%group_by(emp_length)%>%
+  summarize("count" = n())%>%
+  arrange(desc(count))%>%
+  mutate("prct" = (count/sum(count))*100)
+```
+
+
+
+```{r}
+emp_per
+```
+
+
+```{r}
+ggplot(emp_per, aes(x=emp_length, y = prct))+
+  geom_bar(stat='identity')+
+  labs(x = "Employment length", y= "Percentage", title = "Employment length percentage")
+```
+
+### Inference
+#### The employment length of most borrowers is greater than 10 years.
+
+* * *
+
+### Year
+```{r warning=FALSE, message=FALSE}
+yrs_per<-loan%>%group_by(issue_yr)%>%
+  summarize("count" = n())%>%
+  arrange(desc(count))%>%
+  mutate("prct" = (count/sum(count))*100)
+```
+
+
+```{r}
+yrs_per
+```
+
+
+```{r}
+ggplot(yrs_per, aes(x=issue_yr, y = prct))+
+  geom_bar(stat='identity')+
+  labs(x = "Year", y= "Percentage", title = "Year wise percentage")
+```
+
+
+### Inference
+#### The number of loans granted is highest in the year 2015.
+
+* * *
+
+### Interest Rate and loan status
+```{r}
+ggplot(loan, aes(x = loan_status, y=int_rate, fill=loan_status))+geom_boxplot() + 
+  labs(x = "Loan status", y= "Interest rate")
+
+```
+
+### Inference
+#### Charged-off loans have a higher interest rate than fully paid loans, because risky loans are given a higher interest.
+
+* * *
+
+### Grade and Loan status
+```{r}
+ggplot(loan, aes(x=(grade), fill = loan_status))+
+  geom_bar(stat = 'count', position = 'fill')+ coord_flip() +
+  labs(x = "Grade", y= "Frequency", title = "Grade and loan status %")
+```
+
+### Inference
+#### The percentage of defaulted loans or charged off loans are decreasing as grade improves. Thus, loans with grade 'A' are the least risky and loans with grade 'G' are the most risky.
+
+* * *
+
+### Grade and Interest Rate
+```{r}
+ggplot(loan, aes(x=grade, y= int_rate))+
+  geom_boxplot(outlier.colour = 'red')+
+  labs(x = "Grade", y= "Interest rate", title = "Grade and interest rate %")
+```
+
+### Inference
+#### As the grade decreases, the interest rate increases. Hence low grade loans are charged a high interest, since the risk is high.
+
+* * *
+
+### FICO score - Grade
+```{r}
+ggplot(loan, aes(x=grade, y= fico_range_low))+
+  geom_boxplot(outlier.colour = 'red')+ facet_wrap(.~loan_status)+
+  labs(x = "Grade", y= "Fico score", title = "Grade and Fico score")
+```
+
+* * *
+
+### FICO score - percentage of bad loans
+```{r warning=FALSE, message=FALSE}
+
+fico_loss <- loan%>%filter(loan_status == 'Charged.Off')%>%group_by(fico_range_low)%>%summarize('count' = n())%>%
+  mutate('prcnt' = (count/sum(count))*100)
+
+ggplot(fico_loss , aes(x= as.factor(fico_range_low), y = prcnt, group = 1)) +  geom_line()+ geom_point()+
+  labs(x = 'Fico score', y = '% of bad loans', title = '% of bad loans vs FICO score')
+
+```
+
+
+### Inference
+#### As the FICO score increases the percentage of bad loans(charged-off loans) is decreasing, which indicates that risk is low if the FICO score is high and that the borrower is less likely to default or not pay back the loan if the FICO score is high.
+
+* * *
+
+### Delinquency in past 2yrs and Charge-off Rate
+```{r warning=FALSE, message=FALSE}
+delinq_chrff <- loan%>%filter(delinq_2yrs >= 10, loan_status == "Charged.Off")%>%group_by(delinq_2yrs)%>%summarise("chroff_cnt" = n())
+
+delinq_main <- loan%>%filter(delinq_2yrs >= 10)%>%group_by(delinq_2yrs)%>%summarise("Total" = n())
+
+delinq_main <- left_join(delinq_chrff, delinq_main, by = "delinq_2yrs")
+
+delinq_main$chroff_rate <- delinq_main$chroff_cnt/delinq_main$Total
+
+ggplot(delinq_main, aes(x=delinq_2yrs, y =chroff_rate, group =1))+geom_point()+geom_line()+
+  labs(x="Delinquency in past 2yrs", y="Charge-Off Rate", title = "Delinquency in past 2yrs and Charge-off Rate")
+
+```
+
+### Inference
+#### Delinquency is number of times a person has missed their credit payment.
+#### From the graph, we can see that if the number of delinquency is high banks are charging a higher interest, as the risk is high.
+
+* * *
+
+### Number of inquiries in past 6 months and grade
+```{r}
+ggplot(loan, aes(x= grade, y = inq_last_6mths)) + geom_boxplot()+
+  labs(x = 'Grade', y = 'No. of inquiries in past 6 mnths')
+```
+
+* * *
+
+### Number of inquiries in past 6 months and Interest Rate
+```{r warning=FALSE, message=FALSE}
+inq_int<-loan%>%group_by(inq_last_6mths)%>%summarize('Mean'= mean(int_rate), 'Median' = median(int_rate))
+ggplot(inq_int, aes(x=inq_last_6mths, y = Median))+geom_line()+geom_point()+
+  labs(x = 'No. of inquiries in past 6 mnths', y = 'Interest Rate')
+```
+
+### Inference
+#### As the number of inquiries increases the interest rate increases. Hence, banks are considering this feature as an indicator of risk.
+
+* * *
+
+## Loan status prediction
+
+```{r}
+table(loan$loan_status)
+
+ggplot(loan, aes(x=loan_status)) + geom_bar(stat='count', fill = "#0073C2FF") + theme_pubclean()
+
+```
+
+### Inference
+#### From the plot, it can be observed that there is an imbalance in the dataset.
+
+* * *
+
+### Splitting into training and testing set
+```{r}
+
+set.seed(12)
+tr_samples <-  loan$grade%>%
+                 createDataPartition(p=0.8,list = FALSE)
+train_data <- loan[tr_samples,]
+test_data <- loan[-tr_samples,]
+
+```
+
+* * *
+
+### Function for calculating accuracy, precision, recall and f1-score
+```{r}
+#error metrics -- Confusion Matrix
+err_metric=function(CM)
+{
+  TN =CM[1,1]
+  TP =CM[2,2]
+  FP =CM[1,2]
+  FN =CM[2,1]
+  precision =(TP)/(TP+FP)
+  recall_score =(TP)/(TP+FN)
+ 
+  f1_score=2*((precision*recall_score)/(precision+recall_score))
+  accuracy_model  =(TP+TN)/(TP+TN+FP+FN)
+  False_positive_rate =(FP)/(FP+TN)
+  False_negative_rate =(FN)/(FN+TP)
+ 
+  print(paste("Precision value of the model: ",round(precision,2)))
+  print(paste("Accuracy of the model: ",round(accuracy_model,2)))
+  print(paste("Recall value of the model: ",round(recall_score,2)))
+  print(paste("False Positive rate of the model: ",round(False_positive_rate,2)))
+   
+  print(paste("False Negative rate of the model: ",round(False_negative_rate,2)))
+ 
+  print(paste("f1 score of the model: ",round(f1_score,2)))
+  res <- c(accuracy_model ,precision, recall_score, f1_score)
+  return(res)
+}
+```
+
+* * *
+
+### NOTE: In all the following models, class 0 represents fully paid loans or non-defaulters (not risky) and class 1 represents charged off loans or defaulters (risky).
+
+* * *
+
+## Logistic regression
+
+### Model-1
+```{r}
+
+glm.model = glm(outcome ~ loan_amnt + term + int_rate + installment +  annual_inc + fico_range_low + grade + delinq_2yrs 
+                + tot_cur_bal + emp_length + inq_last_6mths + pub_rec,
+                train_data, family = binomial(link = 'logit'))
+
+summary(glm.model)
+
+```
+
+### Inference
+#### All the features used in the model are significant as they have a p-value lower than 0.05.
+
+* * *
+
+### Importance
+```{r}
+imp <- varImp(glm.model)
+imp%>%arrange(desc(Overall))
+
+imp <- imp%>%mutate(variable = rownames(imp))
+
+imp2 <- imp %>% 
+  arrange(Overall) %>%
+  mutate(variable = forcats::fct_inorder(variable))
+
+ggplot(imp2) +
+  geom_point(aes(x = variable, y = Overall), col = "black", show.legend = F) +
+  geom_segment(aes(x = variable, y = 0, xend = variable, yend = Overall), size = 1.5, alpha = 0.7) +
+  coord_flip() +
+  scale_fill_grey() +
+  theme_bw()
+
+
+```
+
+### Inference
+#### From the above plot, it can be observed that grade, total current balance, employment lenght, term and fico score are the top most important features used by the logistic regression model to predict loan defaulters.
+
+* * *
+
+### Outliers
+```{r}
+par(mar=c(2,2,2,2))
+plot(glm.model,4)
+
+model_data <- augment(glm.model) %>%
+              mutate(index=1:n())
+
+
+model_data%>%top_n(3,.cooksd)
+
+ggplot(model_data,aes(index,.std.resid))+geom_point(aes(col=outcome))
+
+model_data %>% filter(abs(.std.resid)>3)
+```
+
+
+### Inference
+#### Around 13 rows have a standard deviation greater than 3. This is quite low when compared to the total number of rows in the dataset, hence can be ignored. 
+
+* * *
+
+### Multicollinearity
+```{r}
+vif(glm.model)
+```
+
+### Inference
+#### None of the features have a VIF value greater than 10, hence high collinearity is not present.
+
+* * *
+
+### ROC curve
+```{r}
+
+preds = predict(glm.model , test_data , type = 'response')
+
+roc_glm1 <- roc(response = test_data$outcome, predictor = preds)
+
+roc_glm1
+
+coords(roc_glm1, "best", ret = "threshold", transpose = TRUE)
+
+plot.roc(x = roc_glm1, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "green", print.auc = FALSE, print.auc.y = .4)
+legend(x = "bottomright", legend=c("glm_1 AUC = 0.703"), 
+       col = c("green"), lty = 1, cex = 1.0)
+
+
+
+```
+
+### Inference
+#### Sensitivity is the true positive rate and 1 - specificity is the false positive rate.
+#### Although false positive rate must be low, it might be useful to allow false positives when finding the positives is very important. Similar, in some cases it might be really important to keep false positives as minimum as possible even if it means the true positives will be less. 
+#### ROC will help decide what threshold to choose.
+#### In this case, the threshold should be around 0.32, in order to obtain an even trade-off between sensitivity and specificity.
+#### It can be adjusted based on the requirements. In order to catch more defaulter the threshold could be reduced, however, this could lead to higher false positive rate. Hence, reducing the chances of making investments as most loans would be classified as risky.
+#### Similarly to increase investments the threshold could be increased, however, this could lead to higher false negative rate. Hence, increasing the chances of making risky investments.
+
+* * *
+
+### Confusion matrix
+```{r}
+pred.cls <- factor(ifelse(preds > 0.3225452  , 1 , 0), levels = c(0,1))
+confusionMatrix(pred.cls, test_data$outcome)
+```
+
+
+### Inference
+#### The model achieved an accuracy of 64%.
+
+* * *
+
+```{r}
+
+CM= table(test_data$outcome, pred.cls)
+res = err_metric(CM)
+
+```
+
+### Inference
+#### This model is 48% accurate when predicting defaulter and catches 59% of the defaulters.
+
+
+* * *
+
+#### Model-2 (with cross-validation)
+```{r}
+ctrl <- trainControl(method = "repeatedcv", 
+               number = 10,
+               repeats = 5,
+               classProbs = TRUE,
+               summaryFunction = twoClassSummary,
+               savePredictions = TRUE,
+               verboseIter = FALSE)
+
+glm.model2 <- train(make.names(outcome) ~ loan_amnt+ installment +term + int_rate +  
+                      annual_inc + fico_range_low + grade + delinq_2yrs + tot_cur_bal + emp_length + inq_last_6mths + pub_rec,
+                train_data,
+                method = "glm", 
+                family = "binomial",
+                metric = "ROC",
+                trControl = ctrl)
+```
+
+
+* * *
+
+### Model details
+
+```{r}
+glm.model2
+```
+
+
+* * * 
+
+### Model summary
+
+```{r}
+summary(glm.model2)
+```
+
+### Inference
+#### 10-fold cross validation is performed in this logistic regression model. 
+
+* * *
+ 
+### Importance
+```{r}
+varImp(glm.model2)
+plot(varImp(glm.model2))
+```
+
+
+### Inference
+#### From the above plot, it can be observed that the results are similar to the previous movel; grade, total current balance, employment lenght, term and fico score are the top most important features used by this logistic regression model as well to predict loan defaulters.
+
+
+* * *
+
+### ROC curve
+```{r}
+
+preds = predict(glm.model2 , test_data , type = 'prob')
+preds <- as.data.frame(preds)
+colnames(preds) <- c("0","1")
+
+roc_glm2 <- roc(response = test_data$outcome, predictor = preds[["1"]])
+
+roc_glm2
+
+plot.roc(x = roc_glm2, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "blue", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("glm_2 AUC = 0.703"), 
+       col = c("blue"), lty = 1, cex = 1.0)
+
+coords(roc_glm2, "best", ret = "threshold", transpose = TRUE)
+
+```
+
+
+* * *
+
+#### Confusion matrix
+```{r}
+
+pred.cls <- apply(preds, 1, function(x) ifelse(x["1"] >= 0.35, 1, 0))
+confusionMatrix(as.factor(pred.cls), test_data$outcome)
+
+```
+
+
+### Inference
+#### The model achieved an accuracy of 66%.
+
+* * *
+
+
+```{r}
+
+CM= table( test_data$outcome, as.factor(pred.cls))
+res = err_metric(CM)
+res <- round(res, digits = 2)
+
+```
+
+#### Inference
+##### This model is 48% accurate when predicting defaulter and catches 59% of the defaulters.
+
+
+* * *
+
+### Table 
+```{r message=FALSE,warning= FALSE}
+
+com_df <- data.frame("Algorithm" = c("Logistic regression"),
+                     "Accuracy" = res[1],
+                     "Precision" = res[2], 
+                     "Recall" = res[3], 
+                     "F1-score" = res[4])
+
+kable(com_df)
+
+```
+
+
+* * *
+
+### Decision tree
+
+```{r}
+
+ctrl <- rpart.control( cp = 0.0001)
+dt.model = rpart(outcome ~ loan_amnt + term + int_rate + installment +  annual_inc + fico_range_low + grade + delinq_2yrs 
+                + tot_cur_bal + emp_length + inq_last_6mths + pub_rec,
+                train_data, method = 'class', control = ctrl)
+
+```
+
+
+* * *
+
+#### Importance
+
+```{r}
+imp_dt <- varImp(dt.model)
+
+imp_dt%>%arrange(desc(Overall))
+
+```
+
+
+
+#### Inference
+##### It can be observed that grade, total current balance, employment lenght, term and fico score are the top most important features used by the logistic regression model to predict loan defaulters.
+
+* * *
+
+#### ROC curve
+```{r}
+preds = predict(dt.model , test_data , type = 'prob')
+
+roc_rpart <- preds[,"1"]
+
+roc_rpart <- roc(response = test_data$outcome, predictor = roc_rpart)
+
+roc_rpart
+
+plot.roc(x = roc_rpart, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "blue", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("rpart AUC = 0.678"), 
+       col = c("blue"), lty = 1, cex = 1.0)
+
+coords(roc_rpart, "best", ret = "threshold", transpose = TRUE)
+
+```
+
+#### Inference
+##### The threshold should be around 0.25, in order to obtain an even trade-off between sensitivity and specificity.
+
+* * *
+
+#### Confusion matrix
+```{r}
+
+preds = predict(dt.model , test_data , type = 'class')
+pred.cls <- factor(preds, levels = c(0,1))
+confusionMatrix(pred.cls, test_data$outcome)
+
+```
+
+
+### Inference
+#### The model achieved an accuracy of 70%.
+
+* * *
+
+```{r}
+
+CM= table( test_data$outcome, pred.cls)
+res = err_metric(CM)
+
+
+```
+
+#### Inference
+##### This model is 58% accurate when predicting defaulter and catches 27% of the defaulters.
+
+* * *
+
+### Table
+
+```{r}
+
+res = round(res, digits = 2)
+com_df <- rbind(com_df, c("Decision tree", res[1], res[2], res[3], res[4]))
+kable(com_df)
+
+```
+
+#### Inference
+##### Based on f1-score, logistic regression is the better model.
+
+* * *
+
+### Naive bayes
+
+```{r}
+nv.model <- naiveBayes(outcome ~ application_type+emp_length+issue_mon+issue_yr+term+grade,data=train_data)
+
+```
+
+##### NOTE: The naive bayes model is built only using the categorical variables in the dataset (due the size of the dataset).
+
+* * *
+
+##### Probability by the model
+```{r}
+
+nv.model
+```
+
+
+
+* * * 
+
+#### ROC curve
+
+```{r}
+preds = predict(nv.model , test_data , type = 'raw')
+prob_nv <- preds[,"1"]
+
+```
+
+
+
+```{r}
+roc_nv <- roc(response = test_data$outcome, predictor = prob_nv)
+roc_nv
+plot.roc(x = roc_nv, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "brown", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("nv AUC = 0.693"), 
+       col = c("brown"), lty = 1, cex = 1.0)
+
+coords(roc_nv, "best", ret = "threshold", transpose = TRUE)
+
+```
+
+
+#### Inference
+##### The threshold should be around 0.28, in order to obtain an even trade-off between sensitivity and specificity.
+
+* * *
+
+#### Confusion matrix
+
+```{r message=FALSE, warning = FALSE}
+
+pred <- nv.model %>% predict(test_data)
+mean(pred == test_data$outcome)
+confusionMatrix(pred, test_data$outcome)
+
+```
+
+
+### Inference
+#### The model achieved an accuracy of 69%.
+
+* * *
+
+```{r}
+
+CM= table( test_data$outcome,pred)
+res = err_metric(CM)
+
+```
+
+#### Inference
+##### This model is 51% accurate when predicting defaulter and catches 38% of the defaulters.
+
+
+* * *
+### Table
+
+```{r}
+
+res = round(res, digits = 2)
+com_df <- rbind(com_df, c("Naive bayes", res[1], res[2], res[3], res[4]))
+kable(com_df)
+
+
+```
+
+#### Inference
+##### Based on f1-score, logistic regression is the better model.
+
+* * *
+
+### Random forest
+```{r}
+
+tr_data <- sample_n(train_data, 200000)
+model <- randomForest(outcome ~ loan_amnt + term + int_rate + installment +  annual_inc + fico_range_low + grade + delinq_2yrs
+                      + acc_now_delinq + emp_length + pub_rec + inq_last_6mths,
+                data = tr_data,
+                method="rf", 
+                importance = TRUE)
+
+```
+
+
+* * *
+
+### Importance of predictors
+```{r}
+importance(model)
+```
+
+
+```{r}
+varImpPlot(model,type=2)
+```
+
+### Inference
+#### From the plot, it can be observed that annual income, installment, interest rate, loan amount and employment length are the 5 top most important features used by random forest when predicting defaulters.
+
+
+* * *
+
+### ROC curve
+
+```{r}
+preds = predict(model , test_data , type = 'prob')
+prob_rf <- preds[,"1"]
+
+roc_rf <- roc(response = test_data$outcome, predictor = prob_rf)
+roc_rf
+plot.roc(x = roc_rf, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "yellow", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("rf AUC = 0.68"), 
+       col = c("yellow"), lty = 1, cex = 1.0)
+
+coords(roc_rf, "best", ret = "threshold", transpose = TRUE)
+
+```
+
+### Inference
+#### The threshold should be around 0.29, in order to obtain an even trade-off between sensitivity and specificity.
+
+* * *
+
+#### Confusion matrix
+
+```{r}
+
+pred <- model %>% predict(test_data)
+mean(pred == test_data$outcome)
+
+confusionMatrix(pred, test_data$outcome)
+
+```
+
+
+### Inference
+#### The model achieved an accuracy of 70%.
+
+* * *
+
+```{r}
+
+CM= table( test_data$outcome,pred)
+res =err_metric(CM)
+
+```
+
+#### Inference
+##### This model is 54% accurate when predicting defaulter and catches 31% of the defaulters.
+
+* * *
+
+### Table
+
+```{r}
+
+res = round(res, digits = 2)
+com_df <- rbind(com_df, c("Random forest", res[1], res[2], res[3], res[4]))
+kable(com_df)
+
+
+```
+
+
+#### Inference
+##### Based on f1-score, logistic regression is the better model.
+
+* * *
+
+### SVM
+```{r}
+tr_data <- sample_n(train_data, 20000)
+
+tr_data <- tr_data%>%dplyr::select("loan_amnt","outcome", "term", "pub_rec", "fico_range_high", "int_rate",
+                            "inq_last_6mths", "acc_now_delinq", "installment", "annual_inc", "fico_range_low", "delinq_2yrs")
+
+
+
+svm_model = svm(outcome~.,data=tr_data,
+                type='C-classification', 
+                kernel="radial",
+              cost=10,
+              probability=TRUE,
+              gamma= 1)
+
+```
+
+#### NOTE: The SVM model is trained on a smaller dataset with only numerical values.
+
+
+* * *
+
+#### ROC curve
+```{r}
+ts_data <- test_data%>%dplyr::select("loan_amnt","outcome", "term", "pub_rec", "fico_range_high", "int_rate",
+                            "inq_last_6mths", "acc_now_delinq", "installment", "annual_inc", "fico_range_low", "delinq_2yrs")
+
+
+pred_svm <- predict(svm_model, ts_data, probability = TRUE)
+
+
+
+```								
+
+
+
+```{r}
+prob_svm <- attr(pred_svm, "probabilities")[,2]
+
+roc_svm <- roc(response = ts_data$outcome, predictor = prob_svm)
+roc_svm
+plot.roc(x = roc_svm, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "black", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("svm AUC = 0.604"), 
+       col = c("black"), lty = 1, cex = 1.0)
+
+coords(roc_svm, "best", ret = "threshold", transpose = TRUE)
+
+
+```
+
+#### Inference
+##### The threshold should be around 0.31, in order to obtain an even trade-off between sensitivity and specificity.
+
+* * *
+
+#### Confusion Matrix
+```{r}
+
+confusionMatrix(as.factor(pred_svm), test_data$outcome)
+
+```
+
+
+### Inference
+#### The model achieved an accuracy of 68%.
+
+* * *
+
+```{r}
+
+CM= table( test_data$outcome,pred_svm)
+res = err_metric(CM)
+
+```
+
+#### Inference
+##### This model is 49% accurate when predicting defaulter and catches 27% of the defaulters.
+##### The model performance might improve if a larger dataset is used for training.
+
+* * *
+
+### Table
+
+```{r}
+
+res = round(res, digits = 2)
+com_df <- rbind(com_df, c("SVM", res[1], res[2], res[3], res[4]))
+kable(com_df)
+
+```
+
+#### Inference
+##### Based on f1-score, logistic regression is the better model.
+
+* * *
+
+### GBM
+```{r}
+
+ctrl <- trainControl(method = "repeatedcv", 
+               number = 5,
+               repeats = 1,
+               classProbs = TRUE,
+               summaryFunction = twoClassSummary,
+               verboseIter = FALSE,
+               allowParallel = TRUE)
+
+tr_data <- sample_n(train_data, 200000)
+
+model_gbm1 <- train(loan_status ~ loan_amnt + term + int_rate + installment +  annual_inc + fico_range_low + 
+                      grade + delinq_2yrs + acc_now_delinq + emp_length + pub_rec + inq_last_6mths, 
+         data = tr_data, 
+         method = "gbm",
+         metric = "ROC",
+         trControl = ctrl,
+         preProc = c("center", "scale"),
+         verbose = FALSE)
+```
+
+
+* * *
+
+```{r}
+model_gbm1
+```
+
+### Inference
+#### The final parameters chosen for the model are 150 trees and a interaction depth of 3.
+
+* * *
+
+### Model details
+
+```{r}
+ggplot(model_gbm1)
+```
+
+### Inference
+#### From the plot, it can observed that the accuracy is improving as the depth and the number of trees increases.
+
+* * *
+
+```{r}
+summary(model_gbm1, 6)
+```
+
+
+### Inference
+#### The most important features in the GBM model are interest rate, term, annual income, fico score and grade.
+
+
+* * *
+
+#### ROC curve
+
+```{r}
+pred_gbm <- predict(model_gbm1, test_data, type="prob")
+  
+```
+
+
+```{r}
+
+roc_gbm <- roc(response = test_data$loan_status, predictor = pred_gbm[,"Charged.Off"])
+roc_gbm
+
+plot.roc(x = roc_gbm, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "red", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("gbm AUC = 0.702"), 
+       col = c("red"), lty = 1, cex = 1.0)
+
+coords(roc_gbm, "best", ret = "threshold", transpose = TRUE)
+
+```
+
+
+### Inference
+#### The threshold should be around 0.30, in order to obtain an even trade-off between sensitivity and specificity.
+
+* * *
+
+### Confusion matrix
+```{r}
+pred.cls <- ifelse(pred_gbm[,"Charged.Off"] > 0.35, 1, 0)
+
+confusionMatrix(as.factor(pred.cls), test_data$outcome)
+```
+
+
+### Inference
+#### The model achieved an accuracy of 70%.
+
+* * *
+
+
+```{r}
+
+CM= table( test_data$outcome,pred)
+res =err_metric(CM)
+
+```
+
+
+### Inference
+#### This model is 54% accurate when predicting defaulter and catches 31% of the defaulters.
+
+* * *
+
+```{r}
+
+res = round(res, digits = 2)
+com_df <- rbind(com_df, c("GBM", res[1], res[2], res[3], res[4]))
+kable(com_df)
+
+
+```
+
+### Inference
+#### Based on f1-score, logistic regression is the better model.
+
+* * *
+
+### XGBoost
+
+```{r}
+
+tr_data <- sample_n(train_data, 300000)
+tr_label <-  tr_data$outcome
+tr_data <- tr_data%>%dplyr::select(loan_amnt, term, pub_rec, fico_range_high, grade, int_rate,
+                            inq_last_6mths, acc_now_delinq, installment, annual_inc, fico_range_low, delinq_2yrs)
+
+
+ts_label <-  test_data$outcome
+ts_data <- test_data%>%dplyr::select(loan_amnt, term, pub_rec, fico_range_high, grade, int_rate,
+                            inq_last_6mths, acc_now_delinq, installment, annual_inc, fico_range_low, delinq_2yrs)
+
+
+tr_label <- as.numeric(as.character(tr_label))
+ts_label <- as.numeric(as.character(ts_label))
+
+xgb.train = xgb.DMatrix(as.matrix(sapply(tr_data, as.numeric)),label=tr_label)
+xgb.test = xgb.DMatrix(as.matrix(sapply(ts_data, as.numeric)),label=ts_label)
+
+
+
+```
+
+
+
+```{r}
+
+params <- params <- list(booster = "gbtree", 
+                         objective = "binary:logistic", 
+                         eta=0.3, 
+                         gamma=0, 
+                         min_child_weight=1, 
+                         subsample=1, 
+                         colsample_bytree=1)
+
+```
+
+
+```{r}
+
+xgb.fit <- xgb.train (params = params, 
+                      data = xgb.train, 
+                      nrounds=79,
+                      watchlist = list(val=xgb.test,train=xgb.train), 
+                      early_stopping_rounds=10, 
+                      nthreads=6,
+                      maximize = F,
+                      verbose=0,
+                      eval_metric = "error")
+
+```
+
+
+* * *
+
+#### ROC curve
+```{r}
+xgbpred <- predict (xgb.fit,xgb.test)
+
+
+roc_xgb <- roc(response = test_data$outcome, predictor = xgbpred)
+roc_xgb
+```
+
+
+### Inference
+#### The threshold should be around 0.32, in order to obtain an even trade-off between sensitivity and specificity.
+
+* * *
+
+```{r}
+plot.roc(x = roc_xgb, legacy.axes = FALSE, xlim = c(1, 0), asp = NA,
+               col = "orange", print.auc = FALSE, print.auc.y = .4)
+
+legend(x = "bottomright", legend=c("xgb AUC = 0.705"), 
+       col = c("orange"), lty = 1, cex = 1.0)
+
+coords(roc_xgb, "best", ret = "threshold", transpose = TRUE)
+```
+
+
+* * *
+
+#### Confusion Matrix
+```{r}
+
+pred.cls <- factor(ifelse(xgbpred > 0.35 , 1 , 0), levels = c(0,1))
+confusionMatrix(pred.cls, as.factor(ts_label))
+
+```
+
+
+### Inference
+#### The model achieved an accuracy of 70%.
+
+* * *
+
+```{r}
+
+CM= table( test_data$outcome,pred)
+res =err_metric(CM)
+
+```
+
+
+### Inference
+#### This model is 54% accurate when predicting defaulter and catches 31% of the defaulters.
+
+
+* * *
+
+```{r}
+
+res = round(res, digits = 2)
+com_df <- rbind(com_df, c("XGBoost", res[1], res[2], res[3], res[4]))
+kable(com_df)
+
+```
+
+### Inference
+#### Based on f1-score, logistic regression is the better model.
+
+* * *
+
+### Comparison
+```{r}
+
+plot.roc(x = roc_glm1, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,
+               col = "green")
+
+plot.roc(x = roc_rpart, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,add = TRUE,
+               col = "blue")
+
+
+plot.roc(x = roc_nv, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,add = TRUE,
+               col = "brown")
+
+plot.roc(x = roc_rf, legacy.axes = TRUE, xlim = c(1, 0), asp = NA, add = TRUE,
+               col = "yellow")
+
+plot.roc(x = roc_gbm, legacy.axes = TRUE, xlim = c(1, 0), asp = NA, add = TRUE,
+               col = "red")
+
+plot.roc(x = roc_xgb, legacy.axes = TRUE, xlim = c(1, 0), asp = NA,add = TRUE,
+               col = "orange")
+			   
+
+legend(x = "bottomright", legend=c("glm_1 AUC = 0.703", "rpart AUC = 0.678","naivebayes AUC = 0.693",
+                                   "rf AUC = 0.687", "gbm AUC = 0.702","xgb AUC = 0.705"), 
+          col = c("green", "blue", "brown", "yellow","red", "orange"), lty = 1, cex = 1.0)
+
+
+```
+
+
+* * *
+
+### Table
+```{r}
+kable(com_df)
+```
+
+
+
+#### Conclusion: 
+###### For this classification problem, 7 different models were built and there performances were measured using metrics like roc, accuracy, precision, recall and f1-score. 
+###### Decision tree achieved the highest accuracy. 
+###### However, based on the f1-score it can observed that logistic regression is the best model to perform loan default prediction as it has the highest score, followed by naive bayes and Random forest, GBM & XGBoost. Finally, decision tree and SVM.
+
+* * *
+
+## Grade prediction (multiclass classification)
+```{r}
+table(loan$grade)
+
+ggplot(loan, aes(x=grade)) + geom_bar(stat='count', fill = "#0073C2FF") + theme_pubclean()
+
+```
+
+
+* * *
+
+### Logistic regression
+```{r}
+
+multi.lr <- multinom(grade ~ loan_amnt + term + pub_rec +fico_range_high+
+                        inq_last_6mths+ acc_now_delinq + installment +  annual_inc + fico_range_low + delinq_2yrs,
+                        data = train_data)
+
+multi.lr
+
+```
+
+
+#### Inference
+##### This model keep grade 'A' as the baseline and predicts the probability of getting the other grades over 'A'. The grade with the highest probability is selected.
+
+* * *
+
+```{r}
+preds <- predict(multi.lr, test_data, type = "prob")
+head(preds)
+```
+
+* * *
+
+#### Confusion matrix
+```{r}
+pred <- multi.lr %>% predict(test_data)
+mean(pred == test_data$grade)
+confusionMatrix(pred, test_data$grade)
+
+```
+
+
+#### Inference
+
+##### The model achieved an accuracy of 55%.
+##### From the sensitivity, it can be observed that the model is good at predicting grades A and B. However, it misses most of the loans with grades E and G.
+
+* * *
+
+### Decision tree
+```{r}
+
+tr_data <- sample_n(train_data, 200000)
+
+ctrl <- rpart.control( cp = 0.00001)
+model.tree <- rpart(grade ~ loan_amnt + term + pub_rec +fico_range_high+
+                         inq_last_6mths+ acc_now_delinq + installment +  annual_inc + fico_range_low + delinq_2yrs,
+                    data=tr_data, method = 'class' , control = ctrl)
+
+
+plotcp(model.tree)
+
+```
+
+
+#### Inference
+##### From the plot, it can observed that the error decreases as the depth of the tree increases.
+
+* * *
+
+#### Importance
+```{r}
+imp_dt <- varImp(model.tree)
+
+imp_dt%>%arrange(desc(Overall))
+
+```
+
+#### Inference
+##### It can be observed that fico score, term, verification status, inquiries in the last 6 months and purpose are the top most important features used by the decision tree to predict grade.
+
+* * *
+
+#### Confusion matrix
+```{r}
+
+pred <- predict(model.tree , test_data , type = 'class')
+
+mean(as.factor(pred) == test_data$grade)
+
+confusionMatrix(as.factor(pred) , test_data$grade)
+
+```
+
+
+#### Inference
+
+##### The model achieved an accuracy of 76%.
+##### From the sensitivity, it can be observed that the model is good at predicting grades A, B, C and D. It even performs fairly well in predicting grades E, F and G.
+
+
+* * *
+
+
+### Naive bayes
+```{r}
+
+nv.grade <- naiveBayes(grade ~ application_type+emp_length+issue_mon+issue_yr+term+loan_status,data=train_data)
+
+```
+
+
+
+
+#### Confusion matrix
+```{r}
+
+pred.cls <- nv.grade%>%predict(test_data)
+confusionMatrix(pred.cls , test_data$grade)
+
+```
+
+#### Inference
+##### The model achieved an accuracy of 29%.
+##### From the sensitivity, it can be observed that the model is only good at predicting grade A. It does not predict any of the other grades accurately.
+
+
+* * *
+
+### Random forest
+```{r}
+
+
+tr_data <- sample_n(train_data, 200000)
+model <- randomForest(grade ~ loan_amnt + term + pub_rec +fico_range_high+
+                         inq_last_6mths+ acc_now_delinq + installment +  annual_inc + fico_range_low + delinq_2yrs  ,
+                         data = tr_data,method="rf", trcontrol= trainControl("cv",number = 10),importance=TRUE)
+
+
+```
+
+
+* * *
+
+##### Importance
+```{r}
+
+varImpPlot(model,type=2)
+
+```
+
+#### Inference
+##### It can be observed that installment,loan amount, annual income, fico score and term are the top most important features used by the random forest to predict grade.
+
+* * *
+
+#### Confusion matrix
+```{r}
+
+pred <- model %>% predict(test_data)
+mean(pred == test_data$grade)
+confusionMatrix(pred, test_data$grade)
+
+```
+
+#### Inference
+
+##### The model achieved an accuracy of 64%.
+##### From the sensitivity, it can be observed that the model is fairly good at predicting grades A, B and C. It does not predict grades F and G properly.
+
+
+* * *
+
+### XGBoost
+```{r}
+
+tr_data <- sample_n(train_data, 200000)
+
+tr_label <-  unclass(tr_data$grade)
+tr_label <- tr_label - 1
+
+tr_data <- tr_data%>%dplyr::select(loan_amnt, term,fico_range_high,
+                            inq_last_6mths, acc_now_delinq, installment, annual_inc, fico_range_low, delinq_2yrs)
+
+
+ts_label <-  unclass(test_data$grade)
+ts_label <- ts_label - 1
+ts_data <- test_data%>%dplyr::select(loan_amnt, term,  fico_range_high, 
+                            inq_last_6mths, acc_now_delinq, installment, annual_inc, fico_range_low, delinq_2yrs)
+
+
+xgb.train = xgb.DMatrix(as.matrix(sapply(tr_data, as.numeric)),label=tr_label)
+xgb.test = xgb.DMatrix(as.matrix(sapply(ts_data, as.numeric)),label=ts_label)
+
+
+
+```
+
+
+
+```{r}
+
+num_class = 7
+params = list(
+  booster="gbtree",
+  eta=0.001,
+  max_depth=5,
+  gamma=3,
+  subsample=0.75,
+  colsample_bytree=1,
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+
+```
+
+
+```{r}
+
+xgb.fit=xgb.train(
+  params=params,
+  data=xgb.train,
+  nrounds=79,
+  nthreads=4,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+```
+
+```{r}
+
+xgb.pred = predict(xgb.fit,xgb.test,reshape=T)
+
+xgb.pred = as.data.frame(xgb.pred)
+
+colnames(xgb.pred) = levels(test_data$grade)
+
+```
+
+
+#### Confusion matrix
+```{r}
+
+pred.cls = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+
+pred.cls <- factor(pred.cls, levels = c("A", "B", "C", "D", "E", "F", "G"))
+
+confusionMatrix(pred.cls, test_data$grade)
+
+```
+
+#### Inference
+##### The model achieved an accuracy of 44%.
+##### From the sensitivity, it can be observed that the model does not predict the grades accurately.
+
+* * *
+
+### Comparison
+#### Logistic regression - 55.29%
+#### Decision tree - 76.7%
+#### Naive bayes - 
+#### Random forest - 64.95%
+#### XGBoost - 44.41%
+
+#### Conclusion: Decision tree was found to have the highest accuracy in predicting grade.
+
+
+
+
