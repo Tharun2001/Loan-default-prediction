@@ -7,9 +7,6 @@ output:
     theme: spacelab
   pdf_document: default
 ---
-### Reg. No: 18BCE1314
-
-### Name: THARUN BHARGAV A
 
 ## Setup
 ## Loading the dataset
