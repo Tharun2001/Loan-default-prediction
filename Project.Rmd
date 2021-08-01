@@ -1,5 +1,5 @@
 ---
-title: "Loan approval prediction"
+title: "Loan default prediction"
 output:
   html_document:
     fig_height: 4
